@@ -6,7 +6,7 @@ Reverse-engineering the FECS speed-select limiter on NVIDIA CMP 100-210 (GV100) 
 
 [MIT](LICENSE)
 
-## The Hook
+## The Cards
 
 The CMP 100-210 is a crypto-mining-era card built on GV100 silicon -- the same chip as Tesla V100 and Titan V. Second-hand cards go for cheap. I bought 4 for ~$250, then a used Octominer from eBay with 12 more for $1500. ~$2k for 256GB of HBM2 VRAM with 13.28 TB/s aggregate bandwidth.
 
