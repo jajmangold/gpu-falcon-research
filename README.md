@@ -55,6 +55,88 @@ flowchart TD
   policy --> symptom["Tensor/HMMA throughput stays capped"]
 ```
 
+## What the Leaked Source Tree Revealed
+
+The 2022 [Lapsus$ NVIDIA ransomware leak](https://www.deepwatch.com/labs/nvidia-confirms-data-was-stolen-lapsus-takes-credit) included a massive internal Volta-era source tree. It contained HAL dispatch tables, register definitions, generated headers, and verification-only controls that don't exist in NVIDIA's public GPU kernel modules.
+
+This repo does not redistribute the tree. But the source gave us a map of what NVIDIA calls things -- and that map connected live hardware measurements to driver internals without guessing from raw offsets.
+
+### The Register Definitions
+
+The exact FECS speed-select register family, from `volta/gv100/dev_graphics_nobundle.h`:
+
+```c
+#define NV_PGRAPH_PRI_FECS_FEATURE_READOUT_SM_SPEED_SELECT_DP    20:20
+#define NV_PGRAPH_PRI_FECS_FEATURE_READOUT_SM_SPEED_SELECT_IMLA  21:21
+#define NV_PGRAPH_PRI_FECS_FEATURE_READOUT_SM_SPEED_SELECT_FMLA  22:22
+
+#define NV_PGRAPH_PRI_FECS_FEATURE_OVERRIDE_SM_SPEED_SELECT      0x00409664
+#define NV_PGRAPH_PRI_FECS_FEATURE_OVERRIDE_SM_SPEED_SELECT_IMLA 0:0
+#define NV_PGRAPH_PRI_FECS_FEATURE_OVERRIDE_SM_SPEED_SELECT_FMLA 4:4
+#define NV_PGRAPH_PRI_FECS_FEATURE_OVERRIDE_SM_SPEED_SELECT_DP   8:8
+```
+
+The same register also appears in the context-switch firmware surface (`dev_ctxsw_firmware.h`), proving it's not just a BAR0 artifact -- the speed-select state is part of the FECS/CTXSW lifecycle.
+
+### The RM HAL Dispatch Table
+
+The source shows exactly why the limiter can't be read through normal driver APIs. From `gr.def`:
+
+```perl
+GET_SM_ISSUE_RATE_MODIFIER => [
+    STUB_RETURNS  => NV_ERR_NOT_SUPPORTED,
+    _TU102        => [ TURING, ],
+    _GA100        => [ AMPERE_and_later, ],
+    _STUB         => [ pre_TURING, ],
+],
+```
+
+GV100 is pre-Turing. The readback path is deliberately stubbed. Meanwhile, the Turing implementation reads the exact register family we expected:
+
+```c
+// grtu102.c
+NvU32 regVal = GPU_REG_RD32(pGpu, NV_PGRAPH_PRI_FECS_FEATURE_READOUT_1);
+pParams->imla0  = REF_VAL(..._SM_SPEED_SELECT_IMLA0, regVal);
+pParams->fmla16 = REF_VAL(..._SM_SPEED_SELECT_FMLA16, regVal);
+pParams->dp     = REF_VAL(..._SM_SPEED_SELECT_DP, regVal);
+```
+
+And Ampere exposes explicit multi-rate selectors including the 1/16 value we measured:
+
+```c
+// grga100.c
+pParams->fmla16 = REF_VAL(NV_FUSE_FEATURE_READOUT_1_SM_SPEED_SELECT_FMLA16, regVal);
+ct_assert(NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_16 ==
+          NV_FUSE_FEATURE_OVERRIDE_SM_SPEED_SELECT_FMLA32_REDUCED_SPEED_1_16);
+```
+
+### The Access Map That Blocks Debuggers
+
+The GV100 user register access map (`gpu_gv100.c`) controls what user-space regops can reach. Local lookup against the generated `user_access_map.bin` denied exactly the two registers that matter:
+
+```
+0x00409660  NV_PGRAPH_PRI_FECS_FEATURE_READOUT
+0x00409664  NV_PGRAPH_PRI_FECS_FEATURE_OVERRIDE_SM_SPEED_SELECT
+```
+
+The verification-only access map editor (`subdevice_diag_ctrl.c`) can rewrite these permissions, but it's gated behind `NV_VERIF_FEATURES` -- a build-time flag that production drivers don't set.
+
+### The Generation Transition
+
+Internal engineering notes in the source describe a transition from older 1-bit SM speed-select fuses to newer 3-bit fuses. GV100's visible model is binary (`FULL_SPEED` / `REDUCED_SPEED`). Later chips expose explicit divisors: `1/2, 1/4, 1/8, 1/16, 1/32`.
+
+The 1/16 we measure on GV100 is real. The exact divisor value is hidden behind the 1-bit abstraction layer that GV100 exposes.
+
+### What the Source Did NOT Give Us
+
+The source tree did not provide a turnkey unlock. It gave us names and boundaries, not bypasses:
+
+- `RMOverrideSmSpeedSelect` and `RMSchMicroSched` exist but are verification-only or later-generation paths
+- The speed-select override producer (the code that *writes* `0x999`) was not found in visible RM code
+- CMP SKU detection exists (`gpuGetIsCmpSku_GV100`) but is a reporting flag, not the limiter itself
+
+The source confirmed that NVIDIA knows about this mechanism. It also confirmed that the GV100 production path deliberately blocks user access to it.
+
 ## Why the Register Is a Dead End (For Now)
 
 Every path to alter the register ends at a boundary:
