@@ -1,0 +1,20 @@
+# Keep this package documentation-only by default.
+*.bin
+*.rom
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.o
+*.so
+*.ko
+*.run
+*.img
+*.dump
+*.dmp
+
+# Local scratch
+scratch/
+tmp/
+*.log
+
