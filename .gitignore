@@ -26,16 +26,22 @@ tools/gv100_priv_level_unlock
 tools/rm_gr_floorsweep_probe
 tools/rm_sm_issue_rate_probe
 tools/nvdebugdump_decrypt_extract
-tools/host-run-*/
-tools/host-run-*.tar.gz
 
-# Run artifacts (large data files, extracted debug dumps, VastAI SSH keys)
-runs/
-tools/dump.zip
+# Vendored third-party tools (not our code to redistribute)
 tools/envytools/
 tools/falcon-tools/
 tools/faucon/
 tools/regaccess_gv100_local/
+
+# Raw run data and debug dumps (too large for repo)
+runs/
+host-dumps/
+tools/dump.zip
+tools/host-run-*/
+tools/host-run-*.tar.gz
+
+# Archive notes
+_ARCHIVE_NOTE.md
 
 # Editor/IDE
 .vscode/
@@ -53,6 +59,3 @@ Thumbs.db
 *.log
 core
 core.*
-
-# Archive notes
-_ARCHIVE_NOTE.md
